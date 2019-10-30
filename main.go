@@ -5,7 +5,9 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"math/big"
 
 	"github.com/btcsuite/btcutil/base58"
 
@@ -14,10 +16,34 @@ import (
 
 // https://en.bitcoin.it/wiki/Technical_background_of_version_1_Bitcoin_addresses
 func main() {
+	// Create private key
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		panic(err)
 	}
+
+	payload := []byte("hi there!")
+	r, s, err := ecdsa.Sign(rand.Reader, privateKey, payload)
+
+	// Concat r + s for creating a single 64 byte signature
+	sig := append(r.Bytes(), s.Bytes()...)
+
+	// Convert to hex for display
+	sigString := hex.EncodeToString(sig)
+	fmt.Printf("Sig: %s\n", sigString)
+
+	// Start verification - Read in bytes
+	sigBytes, _ := hex.DecodeString(sigString)
+
+	// recreate r + s from splitting the []byte in half
+	r = big.NewInt(0)
+	r = r.SetBytes(sigBytes[:32])
+	s = big.NewInt(0)
+	s = s.SetBytes(sigBytes[32:])
+
+	// verify payload
+	ok := ecdsa.Verify(&privateKey.PublicKey, payload, r, s)
+	fmt.Printf("OK? %v\n\n", ok)
 
 	fmt.Printf("Priv:  %x\n", privateKey.D.Bytes())
 
