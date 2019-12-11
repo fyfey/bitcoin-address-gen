@@ -1,11 +1,10 @@
 package main
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"encoding/hex"
 	"testing"
+
+	"github.com/btcsuite/btcd/btcec"
 )
 
 const (
@@ -31,7 +30,7 @@ func TestHash160ToAddress(t *testing.T) {
 	result := Hash160ToAddress(Hash160(testBytes))
 
 	if result != expected {
-		t.Errorf("PubKeyHashToAddress failed. Expected %s; got %s", expected, result)
+		t.Errorf("Hash160ToAddress failed. Expected %s; got %s", expected, result)
 	}
 }
 
@@ -48,19 +47,25 @@ func TestAddressToHash160(t *testing.T) {
 }
 
 func TestSignAndVerify(t *testing.T) {
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	privateKey, err := btcec.NewPrivateKey(btcec.S256())
 	if err != nil {
 		t.Error(err)
 	}
+	publicKey := privateKey.PubKey()
+	pubKeyHash := publicKey.SerializeCompressed()
 
 	payload := []byte("hi there!")
 
-	sig, err := Sign(privateKey, payload)
+	sig, err := privateKey.Sign(payload)
 	if err != nil {
 		panic(err)
 	}
 
-	ok := Verify(sig, &privateKey.PublicKey, payload)
+	rebuiltPubKey, err := btcec.ParsePubKey(pubKeyHash, btcec.S256())
+	if err != nil {
+		t.Error(err)
+	}
+	ok := sig.Verify(payload, rebuiltPubKey)
 
 	if ok == false {
 		t.Errorf("Verification failed\n")

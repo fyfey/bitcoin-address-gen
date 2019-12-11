@@ -6,9 +6,25 @@ import (
 	"crypto/sha256"
 	"math/big"
 
+	"github.com/btcsuite/btcd/btcec"
 	"github.com/btcsuite/btcutil/base58"
 	"golang.org/x/crypto/ripemd160"
 )
+
+func NewKey() *btcec.PrivateKey {
+	key, _ := btcec.NewPrivateKey(btcec.S256())
+	return key
+}
+
+// DecompressPublicKey creates a ecdsa.PublicKey from PubKeyHash
+func DecompressPublicKey(compressed []byte) (*btcec.PublicKey, error) {
+	pubKey, err := btcec.ParsePubKey(compressed, btcec.S256())
+	if err != nil {
+		return nil, err
+	}
+
+	return pubKey, nil
+}
 
 // Hash160 creates the ripe(sha256(pubKeyHash)) hash
 func Hash160(pubKeyHash []byte) []byte {
@@ -17,15 +33,6 @@ func Hash160(pubKeyHash []byte) []byte {
 	ripe.Write(shaHash[:])
 
 	return ripe.Sum(nil)
-}
-
-// PubKeyHash generates a 33 byte pubKey from a ecdsa key pair
-func PubKeyHash(privateKey *ecdsa.PrivateKey) []byte {
-	var prefix byte = 0x01
-	if privateKey.Y.Bit(0) == 0 {
-		prefix = 0x02
-	}
-	return append([]byte{prefix}, privateKey.PublicKey.X.Bytes()...)
 }
 
 func doubleSha(data []byte) []byte {
@@ -67,11 +74,34 @@ func Sign(privateKey *ecdsa.PrivateKey, payload []byte) ([]byte, error) {
 }
 
 // Verify verifies a signature
-func Verify(signature []byte, publicKey *ecdsa.PublicKey, payload []byte) bool {
-	r := big.NewInt(0)
-	r = r.SetBytes(signature[:32])
-	s := big.NewInt(0)
-	s = s.SetBytes(signature[32:])
+func Verify(signature []byte, pubKeyHash []byte, payload []byte) bool {
+	publicKey, err := btcec.ParsePubKey(pubKeyHash, btcec.S256())
+	if err != nil {
+		panic(err)
+	}
 
-	return ecdsa.Verify(publicKey, payload, r, s)
+	sig, err := btcec.ParseSignature(signature, btcec.S256())
+	if err != nil {
+		panic(err)
+	}
+
+	return sig.Verify(payload, publicKey)
+}
+
+// paddedAppend appends the src byte slice to dst, returning the new slice.
+// If the length of the source is smaller than the passed size, leading zero
+// bytes are appended to the dst slice before appending src.
+func paddedAppend(size uint, dst, src []byte) []byte {
+	for i := 0; i < int(size)-len(src); i++ {
+		dst = append(dst, 0)
+	}
+	return append(dst, src...)
+}
+
+func fromHex(s string) *big.Int {
+	r, ok := new(big.Int).SetString(s, 16)
+	if !ok {
+		panic("invalid hex in source file: " + s)
+	}
+	return r
 }

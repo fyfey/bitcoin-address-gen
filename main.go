@@ -1,66 +1,82 @@
 package main
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
-
-	"github.com/btcsuite/btcutil/base58"
-
-	"golang.org/x/crypto/ripemd160"
 )
 
 // https://en.bitcoin.it/wiki/Technical_background_of_version_1_Bitcoin_addresses
 func main() {
-	// Create private key
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	// Bob sending 10 to alice
+	bob := NewKey()
+	alice := NewKey()
+
+	txStore := map[string]*Transaction{}
+
+	bobAddr := Hash160(bob.PubKey().SerializeCompressed())
+	aliceAddr := Hash160(alice.PubKey().SerializeCompressed())
+
+	fmt.Printf("Coinbase sending 10 to %s\n", Hash160ToAddress(bobAddr))
+
+	// "Coinbase" TX
+	txA := NewTransaction()
+	output := &Output{
+		ToAddress: bobAddr,
+		Value:     10,
+	}
+	txA.Outputs = append(txA.Outputs, output)
+	txAID := sha256.Sum256(txA.CalcHash())
+
+	txStore[hex.EncodeToString(txAID[:])] = txA
+
+	fmt.Printf("txAHash: %x\n", txA.CalcHash())
+	fmt.Printf("TxA ID:  %x\n", txAID)
+
+	// Bob sending to alice
+	txB := NewTransaction()
+	txB.AddInput(fmt.Sprintf("%x", txAID), 0, alice.PubKey())
+	aliceOutput := &Output{
+		ToAddress: aliceAddr,
+		Value:     10,
+	}
+	txB.Outputs = append(txB.Outputs, aliceOutput)
+	txBHash := txB.CalcHash()
+
+	fmt.Printf("txBHash: %x\n", txBHash)
+	fmt.Printf("txBHash: %x\n", txB.CalcHash())
+
+	sigHash, err := txB.HashForSig(0, txStore)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("SigHash A: %x\n", sigHash)
+	sig, err := alice.Sign(sigHash)
 	if err != nil {
 		panic(err)
 	}
 
-	payload := []byte("hi there!")
+	txB.Inputs[0].Signature = sig.Serialize()
 
-	sig, err := Sign(privateKey, payload)
+	fmt.Printf("Input 0: PubKey: %x\n", txB.Inputs[0].PublicKey)
+	fmt.Printf("Input 0: Sig: %x\n", txB.Inputs[0].Signature)
+
+	fmt.Printf("\nAttempt to verify...\n")
+
+	// Lets mess with the TX!
+	txB.Outputs[0].Value = 10
+
+	sigHashAgain, err := txB.HashForSig(0, txStore)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("Sig: %x\n", sig)
 
-	ok := Verify(sig, &privateKey.PublicKey, payload)
-	fmt.Printf("OK? %v\n", ok)
-
-	pubKeyHash := PubKeyHash(privateKey)
-	fmt.Printf("pubKeyHash: %x\n", pubKeyHash)
-
-	address := Hash160ToAddress(Hash160(pubKeyHash))
-	fmt.Printf("Address: %s (%x)\n", address, address)
-
-	two := sha256.Sum256(pubKeyHash)
-	fmt.Printf("Two:   %x\n", two)
-
-	ripe := ripemd160.New()
-	ripe.Write(two[:])
-
-	three := ripe.Sum(nil)
-	fmt.Printf("Three: %x\n", three)
-
-	four := append([]byte{0x00}, three...)
-	fmt.Printf("Four:  %x\n", four)
-
-	five := sha256.Sum256(four)
-	fmt.Printf("Five:  %x\n", five)
-
-	six := sha256.Sum256(five[:])
-	fmt.Printf("Six:   %x\n", six)
-
-	checksum := six[0:4]
-	fmt.Printf("chksm: %x\n", checksum)
-
-	eight := append(four, checksum...)
-	fmt.Printf("eight: %x\n", eight)
-
-	nine := base58.Encode(eight)
-	fmt.Printf("nine:  %s\n", nine)
+	fmt.Printf("SigHash B: %x\n", sigHashAgain)
+	ok := Verify(txB.Inputs[0].Signature, txB.Inputs[0].PublicKey, sigHashAgain)
+	//ok := reformedSig.Verify(sigHashAgain, alicePubReformed)
+	if ok {
+		fmt.Println("OK!")
+	} else {
+		fmt.Println("Verify failed")
+	}
 }
