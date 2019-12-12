@@ -126,3 +126,42 @@ func (t *Transaction) HashForSig(idx int, txMap map[string]*Transaction) ([]byte
 
 	return sum[:], nil
 }
+
+func IssueToAddress(address string, amount int) (*Transaction, error) {
+	tx := NewTransaction()
+	output := &Output{
+		ToAddress: AddressToHash160(address),
+		Value:     amount,
+	}
+	tx.Outputs = append(tx.Outputs, output)
+	s := sha256.Sum256(tx.CalcHash())
+	tx.TxID = s[:]
+
+	return tx, nil
+}
+
+func Send(fromAddress string, fromPubKey *btcec.PublicKey, toAddress string, amount int) (*Transaction, error) {
+	tx := NewTransaction()
+	tx.AddInput(fmt.Sprintf("%x", tx.TxID), 0, fromPubKey)
+	aliceOutput := &Output{
+		ToAddress: aliceAddr,
+		Value:     10,
+	}
+	txB.Outputs = append(txB.Outputs, aliceOutput)
+	txBHash := txB.CalcHash()
+
+	fmt.Printf("txBHash: %x\n", txBHash)
+	fmt.Printf("txBHash: %x\n", txB.CalcHash())
+
+	sigHash, err := txB.HashForSig(0, txStore)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("SigHash A: %x\n", sigHash)
+	sig, err := bob.Sign(sigHash)
+	if err != nil {
+		panic(err)
+	}
+
+	txB.Inputs[0].Signature = sig.Serialize()
+}

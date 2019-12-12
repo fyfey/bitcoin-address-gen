@@ -48,6 +48,10 @@ func checksum(versioned []byte) []byte {
 	return hashed[0:4]
 }
 
+func PubKeyToAddress(pubKey *btcec.PublicKey) string {
+	return Hash160ToAddress(Hash160(pubKey.SerializeCompressed()))
+}
+
 // Hash160ToAddress converts a pubKeyHash into an address
 func Hash160ToAddress(hash160 []byte) string {
 	versioned := append([]byte{0x00}, hash160...)

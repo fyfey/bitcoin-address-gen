@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 )
@@ -20,22 +19,18 @@ func main() {
 	fmt.Printf("Coinbase sending 10 to %s\n", Hash160ToAddress(bobAddr))
 
 	// "Coinbase" TX
-	txA := NewTransaction()
-	output := &Output{
-		ToAddress: bobAddr,
-		Value:     10,
-	}
-	txA.Outputs = append(txA.Outputs, output)
-	txAID := sha256.Sum256(txA.CalcHash())
-
-	txStore[hex.EncodeToString(txAID[:])] = txA
+	txA, _ := IssueToAddress(PubKeyToAddress(bob.PubKey()), 10)
+	txStore[hex.EncodeToString(txA.TxID)] = txA
 
 	fmt.Printf("txAHash: %x\n", txA.CalcHash())
-	fmt.Printf("TxA ID:  %x\n", txAID)
+	fmt.Printf("TxA ID:  %x\n", txA.TxID)
 
 	// Bob sending to alice
+
+	txB, err := Send(PubKeyToAddress(bob.PubKey()), PubKeyToAddress(alice.PubKey()), 10)
+
 	txB := NewTransaction()
-	txB.AddInput(fmt.Sprintf("%x", txAID), 0, alice.PubKey())
+	txB.AddInput(fmt.Sprintf("%x", txA.TxID), 0, bob.PubKey())
 	aliceOutput := &Output{
 		ToAddress: aliceAddr,
 		Value:     10,
@@ -51,7 +46,7 @@ func main() {
 		panic(err)
 	}
 	fmt.Printf("SigHash A: %x\n", sigHash)
-	sig, err := alice.Sign(sigHash)
+	sig, err := bob.Sign(sigHash)
 	if err != nil {
 		panic(err)
 	}
