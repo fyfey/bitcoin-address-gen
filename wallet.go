@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 
@@ -19,6 +21,7 @@ type Wallet struct {
 	Address     string
 	PrivateKey  *btcec.PrivateKey
 	UTXs        map[string]*Transaction
+	UTXOs       map[string]*StoredOutput
 	IncomingTXs chan *Transaction
 	OutgoingTxs chan *Transaction
 }
@@ -30,35 +33,28 @@ func NewWallet(name string) *Wallet {
 		PrivateKey:  key,
 		Address:     PubKeyToAddress(key.PubKey()),
 		UTXs:        map[string]*Transaction{},
+		UTXOs:       map[string]*StoredOutput{},
 		IncomingTXs: make(chan *Transaction),
 		OutgoingTxs: make(chan *Transaction),
 	}
 }
 
-func (w *Wallet) getUTXOs() map[string]*StoredOutput {
-	UTXOs := map[string]*StoredOutput{}
-	for _, tx := range w.UTXs {
-		for idx, out := range tx.Outputs {
-			if bytes.Equal(out.ToAddress, AddressToHash160(w.Address)) {
-				txIDStr := hex.EncodeToString(tx.TxID)
-				UTXOs[txIDStr] = &StoredOutput{
-					Output: out,
-					Index:  idx,
-				}
-			}
-		}
-	}
-
-	return UTXOs
-}
-
 func (w *Wallet) Balance() (balance int) {
 	// Find TX outputs
-	for _, out := range w.getUTXOs() {
+	for _, out := range w.UTXOs {
 		balance += out.Output.Value
 	}
 
 	return balance
+}
+
+func UTXOHash(txHash []byte, index int) string {
+	b := make([]byte, len(txHash)+4)
+	copy(b, txHash)
+	binary.BigEndian.PutUint32(b, uint32(index))
+	sha := sha256.Sum256(b)
+
+	return hex.EncodeToString(sha[:])
 }
 
 func (w *Wallet) Send(toAddress string, amount int) (*Transaction, error) {
@@ -69,14 +65,25 @@ func (w *Wallet) Send(toAddress string, amount int) (*Transaction, error) {
 		return nil, fmt.Errorf("Not enough funds. Balance is %d", balance)
 	}
 	tx := NewTransaction()
-	for txID, out := range w.getUTXOs() {
-		tx.AddInput(txID, out.Index, w.PrivateKey.PubKey())
+	totalInput := 0
+	for _, out := range w.UTXOs {
+		tx.AddInput(out.TxID, out.Index, w.PrivateKey.PubKey())
+		totalInput += out.Output.Value
+		if totalInput >= amount {
+			break
+		}
 	}
 	output := &Output{
 		ToAddress: AddressToHash160(toAddress),
-		Value:     10,
+		Value:     amount,
 	}
 	tx.Outputs = append(tx.Outputs, output)
+	if totalInput > amount {
+		tx.Outputs = append(tx.Outputs, &Output{
+			ToAddress: AddressToHash160(w.Address),
+			Value:     totalInput - amount,
+		})
+	}
 
 	sigHash, err := tx.HashForSig(0, w.UTXs)
 	if err != nil {
@@ -99,10 +106,44 @@ func (w *Wallet) Send(toAddress string, amount int) (*Transaction, error) {
 func (w *Wallet) Listen() {
 	for tx := range w.IncomingTXs {
 		fmt.Printf("[%s] Got TX %x\n", w.Name, tx.TxID)
-		for _, output := range tx.Outputs {
+		for idx, output := range tx.Outputs {
 			if bytes.Equal(output.ToAddress, AddressToHash160(w.Address)) {
 				fmt.Printf("[%s] +%d coins! %x\n", w.Name, output.Value, tx.TxID)
-				w.UTXs[fmt.Sprintf("%x", tx.TxID)] = tx
+				hash := UTXOHash(tx.TxID, idx)
+				w.UTXOs[hash] = &StoredOutput{
+					Output: output,
+					TxID:   hex.EncodeToString(tx.TxID),
+					Index:  idx,
+				}
+				w.UTXs[hex.EncodeToString(tx.TxID)] = tx
+			}
+		}
+		for _, input := range tx.Inputs {
+			if _, ok := w.UTXs[input.TxHash]; ok {
+				fmt.Printf("[%s] Found spent TX %s\n", w.Name, input.TxHash)
+				txIDBytes, err := hex.DecodeString(input.TxHash)
+				if err != nil {
+					panic(err)
+				}
+				if out, ok := w.UTXOs[UTXOHash(txIDBytes, input.Index)]; ok {
+					fmt.Printf("[%s] Found UTXO! %s\n", w.Name, out.TxID)
+					delete(w.UTXOs, UTXOHash(txIDBytes, input.Index))
+					fmt.Printf("[%s] UTXO len: %d\n", w.Name, len(w.UTXOs))
+				}
+				spendableOutputs := 0
+				for idx, out := range w.UTXs[input.TxHash].Outputs {
+					if !bytes.Equal(out.ToAddress, AddressToHash160(w.Address)) {
+						continue
+					}
+					if _, ok := w.UTXOs[UTXOHash(tx.TxID, idx)]; ok {
+						spendableOutputs++
+						break
+					}
+				}
+				if spendableOutputs == 0 {
+					fmt.Printf("[%s] No more outputs on this tx. Deleting %x\n", w.Name, tx.TxID)
+					delete(w.UTXs, input.TxHash)
+				}
 			}
 		}
 	}

@@ -40,6 +40,24 @@ func (h *Hub) Run() {
 		if len(tx.Inputs) == 0 {
 			fmt.Printf("[Hub] *** Issuance of %d to %s ***\n", tx.Outputs[0].Value, Hash160ToAddress(tx.Outputs[0].ToAddress))
 		}
+		inputValue := 0
+		outputValue := 0
+
+		for _, input := range tx.Inputs {
+			sendingOutput := h.txStore[input.TxHash].Outputs[input.Index]
+			inputValue += sendingOutput.Value
+		}
+		for _, output := range tx.Outputs {
+			outputValue += output.Value
+		}
+
+		txFee := inputValue - outputValue
+		fmt.Printf("In: %d, out: %d, fee: %d\n", inputValue, outputValue, txFee)
+
+		if len(tx.Inputs) > 0 && outputValue > inputValue {
+			panic("Output greater than input!")
+		}
+
 		txID := hex.EncodeToString(tx.TxID)
 		fmt.Printf("[Hub] TX OK! %x\n", tx.TxID)
 		h.txStore[txID] = tx

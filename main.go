@@ -33,6 +33,14 @@ func main() {
 	ch := make(chan bool)
 
 	fmt.Println("wait")
+
+	go func() {
+		for {
+			time.Sleep(time.Millisecond * 500)
+			fmt.Printf("[Wallet] Bob balance:   %d\n", bobWallet.Balance())
+			fmt.Printf("[Wallet] Alice balance: %d\n", aliceWallet.Balance())
+		}
+	}()
 	<-ch
 
 	// Bob sending 10 to alice
